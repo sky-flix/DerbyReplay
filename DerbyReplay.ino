@@ -22,13 +22,12 @@ A photoresistor
 A Laser
 And, if you need to decode an existing IR remote, an Infrared Receiver Module
 various resistors
-Arduino Pro Mini, 8Mhz, 3.3V (This is a very small unit which can run off of a single cell LiPo for hours,
-however any Arduino should work just fine)
+Arduino Pro Mini, 8Mhz, 3.3V (This is a small, power efficient unit, suitable for battery use, but any Arduino will suffice)
 
-Total maximum power consumption (while the laser is active), is approximately 40mA, so a 1000mAh battery will
+Total maximum power consumption (while the laser is active), is less than 40mA, so a 1000mAh battery will
 power the system for practically an entire day.
 
-This could could be easily modified for use with any IR controlled camera, even still cameras.
+This could be easily modified for use with any IR controlled camera, even still cameras.
 
 Many thanks to Ken Shirriff and his IR library, for which without, this project would not have been possible:
 http://www.righto.com/2009/08/multi-protocol-infrared-remote-library.html
@@ -38,146 +37,114 @@ To Do: Switch while loop for photoresistor reading to a hardware interrupt
 
 
 const int sensorPin = A0;
-
-const int ledPinIR = 3; //this can't be changed without modifying IR library
-const int ledPinRed = 4;
-const int ledPinGreen = 5;
-const int laserPin = 6;
+const byte ledPinIR = 3; //this can't be changed without modifying IR library
+const byte ledPinRed = 4;
+const byte ledPinGreen = 5;
+const byte laserPin = 6;
+const byte photoPin = 7;
+const byte irRepeat = 2; // number of times each IR function must be sent for a single command
+const int interIRDelay = 40; // Delay in milliseconds between required repeated IR functions
+const int irDelay=200; // Delay in milliseconds between disparate IR commands
+const byte videoLoopCount = 1; // Number of times to loop through slow scan playback
+const int secondsToPlayback=30; // 3 seconds of recording takes 60s to play back in slow scan
 
 IRsend irsend;
 
-int irRepeat = 2; // number of times each IR function must be sent for a single command
-int interIRDelay = 40; // Delay in milliseconds between required repeated IR functions
-int irDelay=200; // Delay in milliseconds between disparate IR commands
 int sensorValue = 0;
-int videoLoopCount = 1; // Number of times to loop through slow scan playback
-int secondsToPlayback=30; // 3 seconds of recording takes 60s to play back in slow scan
 
-void setup()
-{
+void setup() {
+  
   pinMode(ledPinRed, OUTPUT);
   pinMode(ledPinGreen, OUTPUT);
   pinMode(laserPin, OUTPUT); // My laser is driven directly off a digital output, since it uses only 10mA
   pinMode(ledPinIR, OUTPUT);  
+  pinMode(photoPin, OUTPUT);
   
-  ModeSlowRec(); // put the camera in Smooth Slow Record mode
+  prepForRace();
+  
+  while (true) {
+    
+    if (analogRead(sensorPin) < 900) {
+      
+      digitalWrite(ledPinGreen, LOW);
+      digitalWrite(ledPinRed, HIGH);
+      digitalWrite(laserPin, LOW); // Turn off laser to save power, as minimal as it might be
+      digitalWrite(photoPin, LOW); // Turn off the photo sensor to save power as well
+    
+      record(); // Initiate 3 second Smooth Slow Rec
+    
+      // Camera takes 20 seconds to write the 3s of Smooth record to memory. Since we dont' need to do anything else
+      // during this time, we use Peter Knight's Narcoleptic library to put the unit to sleep to conserve power
+    
+      Narcoleptic.delay(20000);
+    
+      recToPlayback(); // Switch from record to playback mode
+    
+      for (int i=0; i < videoLoopCount; i++) {
+        playLastVideo(); // Select the last video from the index and play it
+      }
 
+      prepForRace();
+    }
+  }
+}
+
+void loop() {
+}
+
+boolean prepForRace() {
+  modeSlowRec();
+  digitalWrite(ledPinRed, LOW);
+  digitalWrite(photoPin, HIGH); // Turn the photo sensor on
   digitalWrite(laserPin, HIGH); // Turn the laser on
     
-  CheckForBeam();
-}
-
-void loop()
-{
-  if (analogRead(sensorPin) > 900)
-  {
-    digitalWrite(ledPinGreen, HIGH);
-  }
-  else
-  {
-    // Begin Main Work Loop
-    digitalWrite(ledPinGreen, LOW);
-    digitalWrite(ledPinRed, HIGH);
-    digitalWrite(laserPin, LOW); // Turn off laser to save power, as minimal as it might be
-    
-    Record(); // Initiate 3 second Smooth Slow Rec
-    
-    // Camera takes 20 seconds to write the 3s of Smooth record to memory. Since we dont' need to do anything else
-    // at this point, we use Peter Knight's Narcoleptic library to put the unit to sleep to conserve power
-    
-    Narcoleptic.delay(20000);
-    
-    RecToPlayback(); // Switch from record to playback mode
-    
-    delay(1000); // Give the camera some time to catch up
-    
-    for (int i=0; i < videoLoopCount; i++)
-    {
-      PlayLastVideo(); // Select the last video from the index and play it
-    }
-
-    ModeSlowRec(); // Switch back to Smooth Slow Record in preparation of next race
-
-    // End Main Work Loop
-    
-    // Prep for next race
-    digitalWrite(ledPinRed, LOW);
-    digitalWrite(laserPin, HIGH); // Turn the laser on
-    
-    CheckForBeam();
-    
-  }
-}
-
-boolean CheckForBeam()
-{
-  while(analogRead(sensorPin) < 900) // Depending on model of photoresistor and ambient light, this value may need to be adjusted.
-    {
+  while(analogRead(sensorPin) < 900) {
       digitalWrite(ledPinGreen, HIGH);
       delay(200);
       digitalWrite(ledPinGreen, LOW);
       delay(200);
-    }
-    return true;
-}
-
-void ModeSlowRec()
-{
-  for (int x = 0; x < 3; x++)
-  {
-    Up();
-    delay(irDelay);
   }
-  for (int x = 0; x < 3; x++)
-  {
-    Left();
-    delay(irDelay);
+  
+  digitalWrite(ledPinGreen, HIGH);
+  return true;
+}
+
+void modeSlowRec() {
+  for (int x = 0; x < 3; x++) {
+    up();
   }
-  Enter();
-  delay(irDelay);
-  Down();
-  delay(irDelay);
-  Enter();
-  delay(irDelay);
+  for (int x = 0; x < 3; x++) {
+    left();
+  }
+  enter();
+  down();
+  enter();
 }
 
-void RecToPlayback()
-{
-  Up();
-  delay(irDelay);
-  Up();
-  delay(irDelay);
-  Enter();
-  delay(2000);
-  Down();
-  delay(irDelay);
-  Enter();
-  delay(irDelay);
+void recToPlayback() {
+  up();
+  up();
+  enter();
+  down();
+  enter();
+  Narcoleptic.delay(2000); // Give the camera some time to catch up
 }
 
-void PlayLastVideo()
-{
+void playLastVideo() {
   // move to last image in index
-  for (int x = 0; x < 5; x++)
-  {
-    Right();
-    delay(irDelay);
+  for (int x = 0; x < 5; x++) {
+    right();
   }
-  for (int y = 0; y < 4; y++)
-  {
-    Down();
-    delay(irDelay);
+  for (int y = 0; y < 3; y++) {
+    down();
   }
-  Enter();
-  delay(irDelay);
-  Enter();
-  delay(irDelay);
+  enter();
+  enter();
   // rewind to beginning, in case we are playing this video for the second time and it wasn't watched all the way through the first time
-  SkipBack();
-  delay(irDelay);
-  Slow();
+  skipBack();
+  slow();
   Narcoleptic.delay(secondsToPlayback * 1000);
-  StopPlayback();
+  stopPlayback();
 }
 
 /*
@@ -185,123 +152,114 @@ Begin specific IR commands, for which the other functions are built upon. My cam
 receive the IR command twice in order to accept it. YMMV.
 */
 
-void Up()
-{
+void up() {
+  delay(irDelay);
   for (int i = 0; i < irRepeat; i++) {
       irsend.sendSony(0x9EB44, 20);
       delay(interIRDelay);
-    }
+  }
 }
 
-void Down()
-{
+void down() {
+  delay(irDelay);
   for (int i = 0; i < irRepeat; i++) {
       irsend.sendSony(0x5EB44, 20);
       delay(interIRDelay);
-    }
+  }
 }
 
-void Left()
-{
+void left() {
+  delay(irDelay);
   for (int i = 0; i < irRepeat; i++) {
       irsend.sendSony(0xDEB44, 20);
       delay(interIRDelay);
-    }
+  }
 }
 
-void Right()
-{
+void right() {
+  delay(irDelay);
   for (int i = 0; i < irRepeat; i++) {
       irsend.sendSony(0x3EB44, 20);
       delay(interIRDelay);
-    }
+  }
 }
 
-void Enter()
-{
+void enter() {
+  delay(irDelay);
   for (int i = 0; i < irRepeat; i++) {
       irsend.sendSony(0xD0B44, 20);
       delay(interIRDelay);
-    }
+  }
 }
 
-void Pause()
-{
-  for (int i = 0; i < irRepeat; i++)
-  {
+void pause() {
+  delay(irDelay);
+  for (int i = 0; i < irRepeat; i++) {
       irsend.sendSony(0x9CB44, 20);
       delay(interIRDelay);
-   }
+  }
 }
 
-void StopPlayback()
-{
-  for (int i = 0; i < irRepeat; i++)
-  {
+void stopPlayback() {
+  delay(irDelay);
+  for (int i = 0; i < irRepeat; i++) {
       irsend.sendSony(0x1CB44, 20);
       delay(interIRDelay);
-   }
+  }
 }
 
-void Index()
-{
-  for (int i = 0; i < irRepeat; i++)
-  {
+void index() {
+  delay(irDelay);
+  for (int i = 0; i < irRepeat; i++) {
       irsend.sendSony(0x2CBC0, 20);
       delay(interIRDelay);
   }
 }
 
 
-void Record()
-{
-  for (int i = 0; i < irRepeat; i++)
-  {
+void record() {
+  delay(irDelay);
+  for (int i = 0; i < irRepeat; i++) {
       irsend.sendSony(0xCBC0, 20);
       delay(interIRDelay);
   }
 }
 
-void Slow()
-{
-  for (int i = 0; i < irRepeat; i++)
-  {
+void slow() {
+  delay(irDelay);
+  for (int i = 0; i < irRepeat; i++) {
       irsend.sendSony(0xC4B44, 20);
       delay(interIRDelay);
   }
 }
 
-void SkipBack()
-{
-  for (int i = 0; i < irRepeat; i++)
-  {
+void skipBack() {
+  delay(irDelay);
+  for (int i = 0; i < irRepeat; i++) {
       irsend.sendSony(0xCB44, 20);
       delay(interIRDelay);
   }
 }
 
-void SkipForward() 
-{
-  for (int i = 0; i < irRepeat; i++)
-  {
+void skipForward() {
+  delay(irDelay);
+  for (int i = 0; i < irRepeat; i++) {
       irsend.sendSony(0x8CB44, 20);
       delay(interIRDelay);
   }
 }
 
-void Play()
-{
-  for (int i = 0; i < irRepeat; i++)
-  {
+void play() {
+  delay(irDelay);
+  for (int i = 0; i < irRepeat; i++) {
       irsend.sendSony(0xC4B44, 20);
       delay(interIRDelay);
   }
 }
 
-void Display()
-{
-  for (int i = 0; i < irRepeat; i++)
-  {
+void menuDisplay() {
+  delay(irDelay);
+  for (int i = 0; i < irRepeat; i++) {
       irsend.sendSony(0x2AB44, 20);
       delay(interIRDelay);
   }
